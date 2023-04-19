@@ -93,7 +93,7 @@ function getStarknetInfoFromViewblock() {
   var range = sheet.getRange(startColumn,  20, maxValueInColumn, 3);
   range.clearContent();
   for (var i = startColumn; i <= maxValueInColumn; i++) {
-    var address = sheet.getRange(i, 3).getValue();
+    var address = sheet.getRange(i, 3).getValue().toLowerCase();
     if (address == '') {
       continue
     }
