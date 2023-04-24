@@ -18,24 +18,25 @@ function eth() {
 function bsc() {
   var apiKey = "请替换你自己的apikey";
   var url= "https://api.bscscan.com/"
-  getBalanceAndTxCountAndGas(url, apiKey, 3);
+  getBalanceAndTxCountAndGas(url, apiKey, 4);
 }
 
 function op() {
   var apiKey = "请替换你自己的apikey";
   var url= "https://api-optimistic.etherscan.io/"
-  getBalanceAndTxCountAndGas(url, apiKey, 6);
+  getBalanceAndTxCountAndGas(url, apiKey, 8);
 }
 
 function arb() {
   var apiKey = "请替换你自己的apikey";
   var url= "https://api.arbiscan.io/"
-  getBalanceAndTxCountAndGas(url, apiKey, 9);
+  getBalanceAndTxCountAndGas(url, apiKey, 12);
 }
 
 function zks() {
   getZkSyncBalance();
   getZkSyncGasAndTxCount();
+  getLastTxFromZkSync();
 }
 
 function starknet() {
@@ -44,7 +45,7 @@ function starknet() {
 
 
 function getStarknetTxAndBalanceFromViewblock(address) {
-  const url = `https://api.viewblock.io/starknet/contracts/${address}?network=mainnet`;
+    const url = `https://api.viewblock.io/starknet/contracts/${address}?network=mainnet`;
   const headers = {
     "Accept": "*/*",
     "Accept-Encoding": "gzip, deflate, br",
@@ -67,7 +68,8 @@ function getStarknetTxAndBalanceFromViewblock(address) {
   const response = UrlFetchApp.fetch(url, options);
   const data = JSON.parse(response.getContentText());
   const txCount = data.txs.total; // 获取交易次数
-
+  const latestTx = data.txs.docs[0];
+  const txHash = latestTx.hash.toLowerCase(); // 获取最近一笔交易的哈希并转换成小写
   const tokens = data.tokens;
   let ethBalance = 0;
   for (const address in tokens) {
@@ -77,23 +79,35 @@ function getStarknetTxAndBalanceFromViewblock(address) {
     }
   }
 
-  // 返回交易次数和 ETH 余额
+  // 计算最近一次交易时间距离现在的时间差
+let timeDiff = "暂无交易";
+if (txHash) {
+  const lastTxTimestamp = latestTx.timestamp;
+  const elapsed = new Date().getTime() - lastTxTimestamp;
+  const elapsedDays = Math.floor(elapsed / (1000 * 60 * 60 * 24));
+  const elapsedHours = Math.floor((elapsed % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  timeDiff = `${elapsedDays} 天 ${elapsedHours} 小时`;
+}
+
+
+  // 返回交易次数、ETH 余额和最近一次交易距离现在的时间差
   return {
     txCount: txCount,
-    ethBalance: ethBalance
+    ethBalance: ethBalance,
+    lastTxTimeDiff: timeDiff
   };
-
 }
+
 
 
 function getStarknetInfoFromViewblock() {
   var sheet = getCurrentSheet();
   var startColumn = 3
   var maxValueInColumn = getMaxOfColumn(2)
-  var range = sheet.getRange(startColumn,  20, maxValueInColumn, 3);
+  var range = sheet.getRange(startColumn,  25, maxValueInColumn, 3);
   range.clearContent();
   for (var i = startColumn; i <= maxValueInColumn; i++) {
-    var address = sheet.getRange(i, 3).getValue();
+    var address = sheet.getRange(i, 3).getValue().toLowerCase();
     if (address == '') {
       continue
     }
@@ -103,8 +117,9 @@ function getStarknetInfoFromViewblock() {
       txAndBalance = 0
       Logger.log('出错了, 地址:' + address)
     }
-    sheet.getRange(i, 20).setValue(txAndBalance.ethBalance);
-    sheet.getRange(i, 21).setValue(txAndBalance.txCount);
+    sheet.getRange(i, 25).setValue(txAndBalance.ethBalance);
+    sheet.getRange(i, 26).setValue(txAndBalance.txCount);
+    sheet.getRange(i, 27).setValue(txAndBalance.lastTxTimeDiff);
     Utilities.sleep(1000);
   }
 }
@@ -138,7 +153,7 @@ function getZkSyncBalance() {
   var sheet = getCurrentSheet();
   var startColumn = 3
   var maxValueInColumn = getMaxOfColumn(2)
-  var range = sheet.getRange(startColumn,  17, maxValueInColumn, 3);
+  var range = sheet.getRange(startColumn,  21, maxValueInColumn, 3);
   range.clearContent();
   for (var i = startColumn; i <= maxValueInColumn; i++) {
     var address = sheet.getRange(i, 2).getValue();
@@ -154,46 +169,60 @@ function getZkSyncBalance() {
       ethBalance = 0
       Logger.log('出错了, 地址:' + address)
     }
-    sheet.getRange(i, 17).setValue(ethBalance);
-    Utilities.sleep(1000);
+    sheet.getRange(i, 21).setValue(ethBalance);
+    Utilities.sleep(1200);
   }
 }
-function getGasAndTxCountFromZkSync() {
+function getLastTxFromZkSync() {
   var sheet = getCurrentSheet();
-  var startColumn = 3
-  var maxValueInColumn = getMaxOfColumn(2)
-  var range = sheet.getRange(startColumn,  19, maxValueInColumn, 2);
+  var startColumn = 3;
+  var maxValueInColumn = getMaxOfColumn(2);
+  var range = sheet.getRange(startColumn, 24, maxValueInColumn, 1);
   range.clearContent();
   for (var i = startColumn; i <= maxValueInColumn; i++) {
     var address = sheet.getRange(i, 2).getValue();
     if (address == '') {
-      continue
+      continue;
     }
     try {
-      var url = "https://zksync2-mainnet-explorer.zksync.io/transactions?limit=5&direction=older&accountAddress="+address;
+      var url =
+        'https://zksync2-mainnet-explorer.zksync.io/transactions?limit=1&direction=newer&accountAddress=' +
+        address;
       var options = {
-        'method': 'get',
-        'contentType': 'application/json'
+        method: 'get',
+        contentType: 'application/json',
       };
       var response = UrlFetchApp.fetch(url, options);
       var json = JSON.parse(response.getContentText());
-      var transaction_count = json.total;
+      var lastTransactionDate = json.list[0].receivedAt; // 修改这一行
+      var lastTransactionTime = new Date(lastTransactionDate).getTime();
+      var elapsedTime = new Date().getTime() - lastTransactionTime;
+      var elapsedDays = Math.floor(elapsedTime / (1000 * 60 * 60 * 24));
+      var elapsedHours = Math.floor(
+        (elapsedTime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)
+      );
+      var elapsedMinutes = Math.floor(
+        (elapsedTime % (1000 * 60 * 60)) / (1000 * 60)
+      );
+      var elapsedTimeString =
+        elapsedDays + ' 天 ' + elapsedHours + ' 小时 ';
     } catch (e) {
-      ethBalance = 0
-      Logger.log('出错了, 地址:' + address)
+      elapsedTimeString = 'N/A';
+      Logger.log('Error occurred, Address:' + address);
     }
 
-    sheet.getRange(i, 18).setValue(transaction_count);
+    sheet.getRange(i, 24).setValue(elapsedTimeString);
 
     Utilities.sleep(1000);
   }
 }
+
 
 function getZkSyncGasAndTxCount() {
   var sheet = getCurrentSheet();
   var startColumn = 3
   var maxValueInColumn = getMaxOfColumn(2)
-  var range = sheet.getRange(startColumn,  18, maxValueInColumn, 2);
+  var range = sheet.getRange(startColumn,  22, maxValueInColumn, 2);
   range.clearContent();
   for (var i = startColumn; i <= maxValueInColumn; i++) {
     var address = sheet.getRange(i, 2).getValue();
@@ -208,61 +237,57 @@ function getZkSyncGasAndTxCount() {
       };
       var response = UrlFetchApp.fetch(url, options);
       var json = JSON.parse(response.getContentText());
-      var gas_usage_count = parseInt(json.gas_usage_count);
+      var gas_usage_count = parseInt(json.gas_usage_count)/1000000000*0.25;
       var transaction_count = json.transaction_count;
     } catch (e) {
       ethBalance = 0
       Logger.log('出错了, 地址:' + address)
     }
 
-    sheet.getRange(i, 18).setValue(transaction_count);
-    sheet.getRange(i, 19).setValue(gas_usage_count);
+    sheet.getRange(i, 22).setValue(transaction_count);
+    sheet.getRange(i, 23).setValue(gas_usage_count);
     Utilities.sleep(1000);
   }
 }
-
-
-
 function getBalanceAndTxCountAndGas(bscURL, apiKey, offset) {
   var sheet = getCurrentSheet();
-  var startColumn = 3
-  var maxValueInColumn = 4
-  var maxValueInColumn = getMaxOfColumn(2)
+  var startColumn = 3;
+  var maxValueInColumn = getMaxOfColumn(2);
   // 清除值
-  var range = sheet.getRange(startColumn,  5 + offset, maxValueInColumn, 3);
+  var range = sheet.getRange(startColumn, 5 + offset, maxValueInColumn, 4);
   range.clearContent();
 
   for (var i = startColumn; i <= maxValueInColumn; i++) {
     var address = sheet.getRange(i, 2).getValue();
     if (address == '') {
-      continue
+      continue;
     }
+
+    // 获取地址余额
     try {
       var url = bscURL +"api?module=account&action=balance&address="+address+"&tag=latest&apikey="+apiKey;
       var response = UrlFetchApp.fetch(url);
       var json = response.getContentText();
       var data = JSON.parse(json);
       var balance = parseInt(data.result)/1000000000000000000;
-      
     } catch (e) {
-      balance = 0
+      balance = 0;
     }
     sheet.getRange(i, 5 + offset).setValue(balance);
 
+    // 获取地址交易数
     try {
       var url = bscURL +"api?module=account&action=txlist&address="+address+"&startblock=0&endblock=99999999&sort=asc&apikey="+apiKey;
       var response = UrlFetchApp.fetch(url);
       var json = response.getContentText();
       var data = JSON.parse(json);
-      // Logger.log("address: %s data: %s ", address, data)
       var numTransactions = data.result.length;
-      
     } catch (e) {
-      numTransactions = 0
+      numTransactions = 0;
     }
     sheet.getRange(i, 6 + offset).setValue(numTransactions);
 
-
+    // 获取地址总燃气消耗
     try {
       var allTxUrl = bscURL +"api?module=account&action=txlist&address=" + address + "&startblock=0&endblock=99999999&sort=asc&apikey=" + apiKey;
       var allTxResponse = UrlFetchApp.fetch(allTxUrl);
@@ -277,27 +302,49 @@ function getBalanceAndTxCountAndGas(bscURL, apiKey, offset) {
           var product = gasPrice * gasUsed;
 
           var formattedProduct = Utilities.formatString("%d", product);
-          var gas = parseInt(formattedProduct)/1000000000000000000
-          // Logger.log("txHash: %s gasPrice: %s gasUsed: %s gas: %s", txHash, gasPrice, gasUsed, gas);
+          var gas = parseInt(formattedProduct)/1000000000000000000;
 
           if (isNaN(gas)) {
-            continue
+            continue;
           }
         } catch (e) {
-          gas = 0
-          continue
+          gas = 0;
+          continue;
         }
 
         totalGasUsed += gas;
-        // Logger.log("txHash: %s gasUsed: %s totalGasUsed: %s", txHash, gasUsed, totalGasUsed);
-        // Utilities.sleep(10000);
       }
     } catch (e) {
-      totalGasUsed = 0
+      totalGasUsed = 0;
     }
     sheet.getRange(i, 7 + offset).setValue(totalGasUsed);
-    Utilities.sleep(100);
+
+    // 获取最后一笔交易距离当前时间的时间差
+    try {
+   var transactionsUrl = bscURL + "api?module=account&action=txlist&address=" + address + "&startblock=0&endblock=99999999&page=1&offset=1&sort=desc&apikey=" + apiKey;
+  var transactionsResponse = UrlFetchApp.fetch(transactionsUrl);
+  var transactionsJson = JSON.parse(transactionsResponse.getContentText());
+  var timestamp = transactionsJson.result[0].timeStamp;
+  if (isNaN(timestamp)) {
+  sheet.getRange(i, 8 + offset).setValue("");
+  continue;
   }
+  var currentTime = new Date();
+  var lastTxTime = new Date(timestamp * 1000);
+  var timeDiff = Math.abs(currentTime.getTime() - lastTxTime.getTime());
+  var minutesDiff = Math.floor((timeDiff / (1000 * 60)) % 60);
+  var hoursDiff = Math.floor((timeDiff / (1000 * 60 * 60)) % 24);
+  var daysDiff = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+  var formattedTimeDiff = daysDiff + " 天 " + hoursDiff + " 小时 ";
+
+  sheet.getRange(i, 8 + offset).setValue(formattedTimeDiff);
+
+} catch (e) {
+  sheet.getRange(i, 8 + offset).setValue("");
+}
+
+Utilities.sleep(1000);
+}
 }
 
 function getCurrentSheet() {
@@ -312,3 +359,4 @@ function getMaxOfColumn(columnNumber) {
   var max = values.length;
   return max;
 }
+
